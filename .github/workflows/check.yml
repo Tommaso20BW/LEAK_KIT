@@ -1,4 +1,4 @@
-name: Controlla font Juventus AWAY 26-27
+name: Controlla font Juventus 26-27
 
 on:
   workflow_dispatch:          # avvio manuale dal tab Actions o via API
@@ -26,12 +26,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_font.py
 
-      - name: Salva flag (se creato)
+      - name: Salva flag (se creati)
         run: |
-          if [ -f .found ]; then
+          if ls .found-* 1> /dev/null 2>&1; then
             git config user.name "font-bot"
             git config user.email "bot@users.noreply.github.com"
-            git add .found
+            git add .found-*
             git commit -m "Immagini trovate, notifica inviata" || true
             git push
           fi
