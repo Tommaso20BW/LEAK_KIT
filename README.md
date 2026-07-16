@@ -1,8 +1,9 @@
 # Juve Font Bot 🦓
 
-Controlla ogni 15 minuti se le immagini del font **AWAY 26-27** sono state
+Controlla se le immagini dei font **AWAY 26-27** e **THIRD 26-27** sono state
 caricate sullo store Juventus. Appena le trova, ti avvisa su Telegram e ti
-invia i PNG in qualità originale. Poi si ferma da solo (flag `.found`).
+invia i PNG in qualità originale. Ogni kit ha il suo flag (`.found-AWAY-26-27`,
+`.found-THIRD-26-27`): la notifica di uno non ferma il monitoraggio dell'altro.
 
 ## Setup
 
@@ -35,11 +36,12 @@ curl -X POST \
 ```
 
 Puoi anche lanciarlo a mano da
-**Actions → Controlla font Juventus AWAY 26-27 → Run workflow** per testarlo.
+**Actions → Controlla font Juventus 26-27 → Run workflow** per testarlo.
 
 ## Note
-- Dopo la notifica il bot crea il file `.found` e lo committa: i run
-  successivi escono subito senza rispammarti. Per "riarmarlo" (es. per la
-  maglia third), cancella `.found` e cambia `AWAY-26-27` nell'URL.
+- Dopo la notifica di un kit, il bot crea `.found-NOMEKIT` e lo committa:
+  quel kit non viene più ricontrollato, l'altro sì. Per riarmare un kit,
+  cancella il suo flag. Per aggiungere kit futuri (es. HOME-27-28), basta
+  aggiungerli alla lista `KITS` in `check_font.py`.
 - Il check verifica che la risposta sia davvero un'immagine (Content-Type
   e dimensione), così eviti falsi positivi da pagine 404 mascherate.
