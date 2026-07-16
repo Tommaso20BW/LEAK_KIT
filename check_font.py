@@ -64,11 +64,11 @@ def check_kit(kit):
         ),
     })
 
-    # Invio le immagini come documenti (qualità originale PNG)
+    # Invio le immagini come foto (visibili subito in chat)
     for n, content in found:
-        tg("sendDocument",
+        tg("sendPhoto",
            data={"chat_id": CHAT_ID, "caption": f"Cifra {n} — {kit}"},
-           files={"document": (f"{kit}-{n}.png", content, "image/png")})
+           files={"photo": (f"{kit}-{n}.png", content, "image/png")})
 
     # Creo il flag: il workflow lo committerà per fermare i run futuri
     with open(flag_file, "w") as f:
