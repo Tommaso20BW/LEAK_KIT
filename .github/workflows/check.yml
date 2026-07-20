@@ -1,15 +1,17 @@
-name: Controlla font Juventus 26-27
+name: Controlla leak Juventus 26-27
 
 on:
-  workflow_dispatch:          # avvio manuale dal tab Actions o via API
-  repository_dispatch:        # trigger da cron esterno via API
-    types: [check-font]
+  repository_dispatch:
+    types: [check-leaks]   # continua a funzionare col tuo cron esterno
+  schedule:
+    - cron: "*/30 * * * *"  # in piu', gira anche da solo ogni 30 minuti
+  workflow_dispatch: {}      # per lanciarlo a mano da Actions
 
 permissions:
-  contents: write             # serve per committare il flag .found
+  contents: write
 
 jobs:
-  check:
+  check-leaks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,20 +20,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install requests
+      - name: Installa dipendenze
+        run: pip install requests beautifulsoup4
 
-      - name: Controlla immagini e notifica
+      - name: Esegui check_store.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python check_store.py
 
-      - name: Salva flag (se creati)
+      - name: Commit stato (flag + notizie viste)
         run: |
-          if ls .found-* 1> /dev/null 2>&1; then
-            git config user.name "font-bot"
-            git config user.email "bot@users.noreply.github.com"
-            git add .found-*
-            git commit -m "Immagini trovate, notifica inviata" || true
-            git push
-          fi
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .found-font-* .found-product-* .seen_news.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Aggiorna stato leak/notizie Juventus"
+          git push
