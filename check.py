@@ -154,11 +154,11 @@ PRODUCT_URL = (
 )
 
 
-def fetch_image(url):
+def fetch_image(url, log_prefix):
     try:
         response = requests.get(url, headers=HEADERS, timeout=20)
     except requests.RequestException as error:
-        print(f"  -> errore rete: {error}")
+        print(f"{log_prefix}errore rete: {error}")
         return None
 
     content_type = response.headers.get("Content-Type", "")
@@ -168,10 +168,10 @@ def fetch_image(url):
         and "svg" not in content_type
         and len(response.content) > 500
     ):
-        print(f"  -> TROVATA! ({len(response.content)} byte)")
+        print(f"{log_prefix}TROVATA! ({len(response.content)} byte)")
         return response.content
 
-    print(f"  -> non ancora ({response.status_code}, {content_type})")
+    print(f"{log_prefix}non ancora ({response.status_code}, {content_type})")
     return None
 
 
@@ -188,8 +188,10 @@ def check_product(code, name):
         code=code,
         suffix="",
     )
-    print(f"[PRODUCT {name}] controllo fronte:")
-    content = fetch_image(front_url)
+    content = fetch_image(
+        front_url,
+        f"[PRODUCT {name}] controllo fronte: ",
+    )
     if content:
         found["fronte"] = content
 
@@ -198,8 +200,10 @@ def check_product(code, name):
         code=code,
         suffix="_d",
     )
-    print(f"[PRODUCT {name}] controllo retro:")
-    content = fetch_image(back_url)
+    content = fetch_image(
+        back_url,
+        f"[PRODUCT {name}] controllo retro: ",
+    )
     if content:
         found["retro"] = content
 
