@@ -1,10 +1,6 @@
 name: Controlla leak Juventus 26-27
 
 on:
-  repository_dispatch:
-    types: [check-leaks]   # continua a funzionare col tuo cron esterno
-  schedule:
-    - cron: "*/30 * * * *"  # in piu', gira anche da solo ogni 30 minuti
   workflow_dispatch: {}      # per lanciarlo a mano da Actions
 
 permissions:
