@@ -146,7 +146,6 @@ PRODUCTS = {
     "07": "HOME-26-27-MANICHE-LUNGHE",
     "08": "AWAY-26-27-MANICHE-LUNGHE",
     "09": "GK-26-27",
-    "10": "AWAY-GK-26-27",
 }
 
 PRODUCT_URL = (
@@ -249,7 +248,7 @@ def check_product(code, name):
 NEWS_TEAM_URL = "https://www.footyheadlines.com/team/Juventus"
 NEWS_STATE_FILE = state_path(".seen_news.json")
 NEWS_MAX_SEEN = 300
-NEWS_MAX_AGE_DAYS = 10
+NEWS_MAX_AGE_DAYS = 2
 
 NEWS_URL_RE = re.compile(
     r"^https://www\.footyheadlines\.com/.+\.html$",
@@ -259,7 +258,7 @@ NEWS_URL_RE = re.compile(
 
 def load_news_state():
     if not os.path.exists(NEWS_STATE_FILE):
-        return {}
+        return {}, False
 
     with open(NEWS_STATE_FILE, "r", encoding="utf-8") as file:
         data = json.load(file)
@@ -267,10 +266,13 @@ def load_news_state():
     # Migrazione automatica dal vecchio formato: [url, url, ...]. La firma
     # corrente viene registrata senza reinviare tutti gli articoli già visti.
     if isinstance(data, list):
-        return {url: None for url in data if isinstance(url, str)}
+        return {url: None for url in data if isinstance(url, str)}, False
 
     if isinstance(data, dict) and isinstance(data.get("articles"), dict):
-        return data["articles"]
+        # I file versione 2 sono stati creati dopo una scansione completa della
+        # pagina e possono quindi essere considerati già inizializzati.
+        initialized = bool(data.get("initialized", data.get("version") == 2))
+        return data["articles"], initialized
 
     raise RuntimeError(
         ".seen_news.json non valido; interrompo per evitare duplicati."
@@ -280,7 +282,8 @@ def load_news_state():
 def save_news_state(state):
     recent_items = list(state.items())[-NEWS_MAX_SEEN:]
     payload = {
-        "version": 2,
+        "version": 3,
+        "initialized": True,
         "articles": dict(recent_items),
     }
     temporary_file = f"{NEWS_STATE_FILE}.tmp"
@@ -295,7 +298,7 @@ def fetch_news_candidates():
     soup = BeautifulSoup(response.text, "html.parser")
 
     candidates = []
-    urls_done = set()
+    candidates_by_url = {}
     headlines = soup.select(
         "h2.post-feed__item-headline, "
         "h2.simple-post-feed__item-headline"
@@ -308,7 +311,22 @@ def fetch_news_candidates():
 
         url = urljoin(NEWS_TEAM_URL, link["href"].strip())
         url = url.split("#", 1)[0].split("?", 1)[0]
-        if not NEWS_URL_RE.match(url) or url in urls_done:
+        if not NEWS_URL_RE.match(url):
+            continue
+
+        tab = heading.find_parent(
+            "div",
+            class_="tab-container__content-tab",
+        )
+        source = str(tab.get("data-id", "page") if tab else "page").lower()
+
+        # Lo stesso articolo può apparire sia in Popular sia in Latest.
+        # Conserviamo tutte le provenienze per sapere se è appena riemerso
+        # nella lista degli aggiornamenti più recenti.
+        if url in candidates_by_url:
+            sources = candidates_by_url[url]["sources"]
+            if source not in sources:
+                sources.append(source)
             continue
 
         content = heading.find_parent(
@@ -325,14 +343,14 @@ def fetch_news_candidates():
                 snippet = paragraph.get_text(" ", strip=True)
                 snippet = re.sub(r"\s*More\s*$", "", snippet).strip()
 
-        urls_done.add(url)
-        candidates.append(
-            {
-                "url": url,
-                "title": heading.get_text(" ", strip=True),
-                "snippet": snippet,
-            }
-        )
+        candidate = {
+            "url": url,
+            "title": heading.get_text(" ", strip=True),
+            "snippet": snippet,
+            "sources": [source],
+        }
+        candidates.append(candidate)
+        candidates_by_url[url] = candidate
 
     return candidates
 
@@ -440,6 +458,14 @@ def is_recent_version(version):
     return max(dates) >= cutoff
 
 
+def is_recent_publication(version):
+    published = parse_article_datetime(version.get("published"))
+    if published is None:
+        return False
+    cutoff = datetime.now(ROME) - timedelta(days=NEWS_MAX_AGE_DAYS)
+    return published >= cutoff
+
+
 def send_news_article(candidate, version, is_update):
     if is_update:
         heading = "🔄 <b>AGGIORNAMENTO FOOTY HEADLINES</b>"
@@ -466,7 +492,7 @@ def send_news_article(candidate, version, is_update):
 
 
 def check_news():
-    state = load_news_state()
+    state, initialized = load_news_state()
     print(f"[NEWS] stato caricato: {len(state)} articoli monitorati.")
 
     try:
@@ -494,6 +520,7 @@ def check_news():
                 "url": url,
                 "title": previous.get("title", "Articolo Footy Headlines"),
                 "snippet": previous.get("description", ""),
+                "sources": ["tracked"],
             }
         )
         candidate_urls.add(url)
@@ -520,10 +547,23 @@ def check_news():
 
         previous = state.get(candidate["url"], "__missing__")
 
+        # Footy Headlines può far riemergere in Latest un articolo molto
+        # vecchio senza aggiornare correttamente dateModified. Se il bot è già
+        # inizializzato e quell'URL non era mai stato visto, la ricomparsa viene
+        # considerata un aggiornamento. Al primo avvio resta invece una baseline
+        # silenziosa, così non vengono inviate in massa le vecchie notizie.
+        unseen_old_update = (
+            previous == "__missing__"
+            and initialized
+            and "latest" in candidate.get("sources", [])
+            and not is_recent_publication(version)
+        )
+
         # Migrazione dal vecchio elenco URL o baseline di un articolo vecchio:
         # registra la versione corrente senza generare notifiche retroattive.
         if previous is None or (
             previous == "__missing__" and not is_recent_version(version)
+            and not unseen_old_update
         ):
             state.pop(candidate["url"], None)
             state[candidate["url"]] = version
@@ -539,8 +579,9 @@ def check_news():
         if not is_new and not is_update:
             continue
 
-        send_news_article(candidate, version, is_update=is_update)
-        label = "aggiornamento" if is_update else "nuova notizia"
+        notify_as_update = is_update or unseen_old_update
+        send_news_article(candidate, version, is_update=notify_as_update)
+        label = "aggiornamento" if notify_as_update else "nuova notizia"
         print(f"[NEWS] notificato {label}: {version['title']}")
 
         state.pop(candidate["url"], None)
