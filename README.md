@@ -1,63 +1,113 @@
-# Juve Leak Bot 🦓
+# 🚨 LeakKit JR
 
-Controlla se sono state caricate sullo store Juventus:
+Monitor Telegram per nuovi asset dello store Juventus e nuove pubblicazioni su Footy Headlines.
 
-1. le immagini dei **font** (cifre di personalizzazione) per **HOME**,
-   **AWAY** e **THIRD 26-27**
-2. le immagini **prodotto** (fronte/retro) per replica, authentic, maniche
-   lunghe e GK 26-27
+Il bot esegue tre controlli indipendenti:
 
-Appena trova qualcosa, ti avvisa su Telegram e ti invia i PNG in qualità
-originale. Ogni kit font e ogni codice prodotto ha il suo flag
-(`.found-font-HOME-26-27`, `.found-product-01`, ecc.): la notifica di uno
-non ferma il monitoraggio degli altri.
+1. cifre dei font di personalizzazione delle maglie 2026/27;
+2. immagini fronte/retro dei prodotti Juventus 2026/27;
+3. articoli Juventus nuovi o realmente aggiornati su Footy Headlines.
 
-## Setup
+## Cosa controlla
 
-### 1. Bot Telegram
+### Font maglie
 
-1. Su Telegram scrivi a **@BotFather** → `/newbot` → segui le istruzioni
-2. Copia il **token** che ti dà (tipo `123456:ABC-DEF...`)
-3. Scrivi un messaggio qualsiasi al tuo nuovo bot (serve per "aprirlo")
-4. Per il tuo **chat ID**: scrivi a **@userinfobot**, ti risponde con il tuo ID
+Per `HOME-26-27`, `AWAY-26-27` e `THIRD-26-27`, `check.py` prova le cifre da 0 a 9 sull’URL di personalizzazione dello store.
 
-### 2. Repository GitHub
+Una risposta viene accettata soltanto se:
 
-1. Crea un repo (anche privato) e carica questi file
-2. Vai su **Settings → Secrets and variables → Actions → New repository secret**
-   - `TELEGRAM_BOT_TOKEN` → il token di BotFather
-   - `TELEGRAM_CHAT_ID` → il tuo ID numerico
+- ha stato HTTP 200;
+- dichiara un contenuto immagine non SVG;
+- contiene più di 500 byte.
 
-### 3. Trigger esterno
+Quando trova un set, il bot invia un avviso e ogni cifra disponibile come foto. Poi crea un flag `.found-font-<KIT>` per non ripetere la notifica.
 
-Il workflow non ha schedule interno: lo avvii tu dal tuo cron esterno con
-una chiamata API. Ti serve un **Personal Access Token** GitHub
-(Settings → Developer settings → Fine-grained token, con permesso
-"Contents: read/write" e "Actions: read/write" sul repo).
+### Prodotti
 
-Chiamata da fare nel cron:
+Il bot controlla i codici `01`–`09` definiti in `PRODUCTS`: replica, authentic, maniche lunghe e portiere. Per ogni codice verifica il fronte e il retro (`_d`) in formato WebP.
 
-```bash
-curl -X POST \
-  -H "Authorization: Bearer IL_TUO_PAT" \
-  -H "Accept: application/vnd.github+json" \
-  https://api.github.com/repos/TUO_USER/TUO_REPO/dispatches \
-  -d '{"event_type":"check-leaks"}'
+Alla prima disponibilità invia le immagini trovate e crea `.found-product-<CODICE>`. Ogni prodotto resta indipendente dagli altri.
+
+### Notizie Footy Headlines
+
+Il bot legge la pagina Juventus di Footy Headlines e apre ogni articolo candidato per estrarre i metadati `NewsArticle`:
+
+- titolo;
+- descrizione;
+- data di pubblicazione e modifica;
+- fingerprint SHA-256 della versione.
+
+In questo modo può distinguere una nuova notizia da un aggiornamento reale. Tiene sotto controllo anche gli URL già salvati, rileva vecchi URL ripubblicati e limita le novità normali a una finestra di **2 giorni**.
+
+Lo stato è salvato in `.seen_news.json` (massimo 300 articoli). Alla prima inizializzazione gli articoli storici vengono registrati senza invii in massa.
+
+## Stato persistente
+
+I file seguenti impediscono notifiche duplicate:
+
+```text
+.found-font-*
+.found-product-*
+.seen_news.json
 ```
 
-Puoi anche lanciarlo a mano da
-**Actions → Controlla leak Juventus 26-27 → Run workflow** per testarlo.
+Il workflow li committa e li pubblica dopo ogni esecuzione. Per riarmare un singolo controllo di font o prodotto, elimina soltanto il relativo flag. Non cancellare `.seen_news.json` senza considerare che il bot dovrà ricostruire la baseline degli articoli.
 
-## Note
+## GitHub Actions
 
-- Dopo la notifica di un kit font, il bot crea `.found-font-NOMEKIT`; dopo
-  la notifica di un prodotto crea `.found-product-CODICE`. Il workflow li
-  committa: quell'elemento non viene più ricontrollato, gli altri sì. Per
-  riarmare un kit/prodotto, cancella il suo flag.
-- Per aggiungere kit font futuri (es. `HOME-27-28`), basta aggiungerli alla
-  lista `FONT_KITS` in `check_leaks.py`.
-- Per aggiungere prodotti futuri, basta aggiungerli al dizionario
-  `PRODUCTS` (codice → nome) in `check_leaks.py`. Se cambia la lettera
-  della stagione (attualmente `A`), aggiorna `PRODUCT_LETTER`.
-- Il check verifica che la risposta sia davvero un'immagine (Content-Type
-  e dimensione), così eviti falsi positivi da pagine 404 mascherate.
+Il workflow [`.github/workflows/check.yml`](.github/workflows/check.yml):
+
+- è avviabile manualmente con `workflow_dispatch`;
+- usa Python 3.12;
+- installa `requests` e `beautifulsoup4` direttamente nel job;
+- esegue `python check.py`;
+- committa i file di stato quando cambiano.
+
+Nel repository non è presente un trigger `schedule` o `repository_dispatch`. Per controlli periodici occorre aggiungere uno schedule oppure chiamare via API il `workflow_dispatch` di `check.yml`.
+
+## Configurazione
+
+Configura in **Settings → Secrets and variables → Actions**:
+
+| Secret | Obbligatorio | Uso |
+|---|---:|---|
+| `TELEGRAM_BOT_TOKEN` | sì | Token del bot Telegram. |
+| `TELEGRAM_CHAT_ID` | sì | Chat o canale di destinazione. |
+
+Il workflow espone anche `GIST_TOKEN`, ma `check.py` non lo legge: non è necessario al funzionamento attuale.
+
+Il job richiede `contents: write` per aggiornare i file di stato con `GITHUB_TOKEN`.
+
+## Avvio
+
+### Da GitHub
+
+Apri **Actions → Controlla leak Juventus → Run workflow**.
+
+### In locale
+
+```bash
+python -m pip install requests beautifulsoup4
+python check.py
+```
+
+Prima dell’avvio imposta `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Non è presente un `requirements.txt`.
+
+## Personalizzazione
+
+In `check.py` puoi aggiornare:
+
+- `FONT_KITS` per le stagioni o i kit futuri;
+- `PRODUCTS` per i codici prodotto;
+- `PRODUCT_LETTER` quando cambia la lettera usata negli URL dello store;
+- `NEWS_MAX_AGE_DAYS` e `NEWS_MAX_SEEN` per la finestra e la dimensione dello stato notizie.
+
+## Limiti noti
+
+- Gli URL dello store e il markup di Footy Headlines non sono API pubbliche stabili e possono cambiare.
+- Un asset viene considerato disponibile sulla base di tipo e dimensione del file, non tramite riconoscimento visivo.
+- Gli errori di rete sui singoli asset vengono registrati e il controllo prosegue; un errore non gestito a livello generale fa fallire il job.
+
+---
+
+Progetto amatoriale, non affiliato con Juventus FC, Telegram o Footy Headlines.
