@@ -466,6 +466,24 @@ def is_recent_publication(version):
     return published >= cutoff
 
 
+def is_republished_old_url(candidate, version):
+    """Rileva un vecchio URL riutilizzato da Footy Headlines come nuova uscita."""
+    url_date = re.search(r"/(\d{4})/(\d{2})/", candidate["url"])
+    published = parse_article_datetime(version.get("published"))
+    if not url_date or published is None:
+        return False
+
+    url_year = int(url_date.group(1))
+    url_month = int(url_date.group(2))
+    return (published.year, published.month) > (url_year, url_month)
+
+
+def handled_version(version):
+    result = dict(version)
+    result["handled_fingerprint"] = version["fingerprint"]
+    return result
+
+
 def send_news_article(candidate, version, is_update):
     if is_update:
         heading = "🔄 <b>AGGIORNAMENTO FOOTY HEADLINES</b>"
@@ -547,6 +565,24 @@ def check_news():
 
         previous = state.get(candidate["url"], "__missing__")
 
+        # Le prime versioni della nuova cache non distinguevano una firma solo
+        # osservata da una firma realmente notificata. Recuperiamo una sola
+        # volta gli URL storici che Footy Headlines ha ripubblicato di recente,
+        # poi salviamo handled_fingerprint per non reinviarli ancora.
+        unhandled_republished = (
+            is_republished_old_url(candidate, version)
+            and is_recent_version(version)
+            and (
+                previous is None
+                or (
+                    isinstance(previous, dict)
+                    and previous.get("fingerprint") == version["fingerprint"]
+                    and previous.get("handled_fingerprint")
+                    != version["fingerprint"]
+                )
+            )
+        )
+
         # Footy Headlines può far riemergere in Latest un articolo molto
         # vecchio senza aggiornare correttamente dateModified. Se il bot è già
         # inizializzato e quell'URL non era mai stato visto, la ricomparsa viene
@@ -565,10 +601,11 @@ def check_news():
             previous == "__missing__" and not is_recent_version(version)
             and not unseen_old_update
         ):
-            state.pop(candidate["url"], None)
-            state[candidate["url"]] = version
-            changed_state = True
-            continue
+            if not unhandled_republished:
+                state.pop(candidate["url"], None)
+                state[candidate["url"]] = handled_version(version)
+                changed_state = True
+                continue
 
         is_new = previous == "__missing__"
         is_update = (
@@ -576,16 +613,18 @@ def check_news():
             and previous.get("fingerprint") != version["fingerprint"]
         )
 
-        if not is_new and not is_update:
+        if not is_new and not is_update and not unhandled_republished:
             continue
 
-        notify_as_update = is_update or unseen_old_update
+        notify_as_update = (
+            is_update or unseen_old_update or unhandled_republished
+        )
         send_news_article(candidate, version, is_update=notify_as_update)
         label = "aggiornamento" if notify_as_update else "nuova notizia"
         print(f"[NEWS] notificato {label}: {version['title']}")
 
         state.pop(candidate["url"], None)
-        state[candidate["url"]] = version
+        state[candidate["url"]] = handled_version(version)
         save_news_state(state)
         changed_state = False
         notifications += 1
