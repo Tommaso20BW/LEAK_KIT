@@ -38,6 +38,10 @@ def state_path(filename):
     return os.path.join(SCRIPT_DIR, filename)
 
 
+def log_status(category, name, message):
+    print(f"[{category} {name}] {message}")
+
+
 def tg(method, **kwargs):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
     response = requests.post(url, timeout=30, **kwargs)
@@ -66,16 +70,17 @@ FONT_URL = (
 def check_font_kit(kit):
     flag_file = state_path(f".found-font-{kit}")
     if os.path.exists(flag_file):
-        print(f"[FONT {kit}] già notificato, salto.")
+        log_status("FONT", kit, "già notificato")
         return
 
     found = []
+    network_errors = 0
     for number in range(10):
         url = FONT_URL.format(kit=kit, n=number)
         try:
             response = requests.get(url, headers=HEADERS, timeout=20)
-        except requests.RequestException as error:
-            print(f"[FONT {kit}] {number}.png -> errore rete: {error}")
+        except requests.RequestException:
+            network_errors += 1
             continue
 
         content_type = response.headers.get("Content-Type", "")
@@ -85,19 +90,13 @@ def check_font_kit(kit):
             and "svg" not in content_type
             and len(response.content) > 500
         ):
-            print(
-                f"[FONT {kit}] {number}.png -> TROVATA! "
-                f"({len(response.content)} byte)"
-            )
             found.append((number, response.content))
-        else:
-            print(
-                f"[FONT {kit}] {number}.png -> non ancora "
-                f"({response.status_code}, {content_type})"
-            )
 
     if not found:
-        print(f"[FONT {kit}] nessuna immagine ancora caricata.")
+        detail = "non disponibile"
+        if network_errors:
+            detail += f" ({network_errors} errori rete)"
+        log_status("FONT", kit, detail)
         return
 
     tg(
@@ -127,7 +126,7 @@ def check_font_kit(kit):
 
     with open(flag_file, "w", encoding="utf-8") as file:
         file.write("notified\n")
-    print(f"[FONT {kit}] notifica inviata, flag creato.")
+    log_status("FONT", kit, f"notificato ({len(found)}/10 immagini)")
 
 
 # ---------------------------------------------------------------------------
@@ -154,12 +153,11 @@ PRODUCT_URL = (
 )
 
 
-def fetch_image(url, log_prefix):
+def fetch_image(url):
     try:
         response = requests.get(url, headers=HEADERS, timeout=20)
-    except requests.RequestException as error:
-        print(f"{log_prefix}errore rete: {error}")
-        return None
+    except requests.RequestException:
+        return None, True
 
     content_type = response.headers.get("Content-Type", "")
     if (
@@ -168,30 +166,27 @@ def fetch_image(url, log_prefix):
         and "svg" not in content_type
         and len(response.content) > 500
     ):
-        print(f"{log_prefix}TROVATA! ({len(response.content)} byte)")
-        return response.content
+        return response.content, False
 
-    print(f"{log_prefix}non ancora ({response.status_code}, {content_type})")
-    return None
+    return None, False
 
 
 def check_product(code, name):
     flag_file = state_path(f".found-product-{code}")
     if os.path.exists(flag_file):
-        print(f"[PRODUCT {name}] già notificato, salto.")
+        log_status("PRODUCT", name, "già notificato")
         return
 
     found = {}
+    network_errors = 0
 
     front_url = PRODUCT_URL.format(
         letter=PRODUCT_LETTER,
         code=code,
         suffix="",
     )
-    content = fetch_image(
-        front_url,
-        f"[PRODUCT {name}] controllo fronte: ",
-    )
+    content, network_error = fetch_image(front_url)
+    network_errors += int(network_error)
     if content:
         found["fronte"] = content
 
@@ -200,15 +195,16 @@ def check_product(code, name):
         code=code,
         suffix="_d",
     )
-    content = fetch_image(
-        back_url,
-        f"[PRODUCT {name}] controllo retro: ",
-    )
+    content, network_error = fetch_image(back_url)
+    network_errors += int(network_error)
     if content:
         found["retro"] = content
 
     if not found:
-        print(f"[PRODUCT {name}] nessuna immagine ancora caricata.")
+        detail = "non disponibile"
+        if network_errors:
+            detail += f" ({network_errors} errori rete)"
+        log_status("PRODUCT", name, detail)
         return
 
     tg(
@@ -238,7 +234,7 @@ def check_product(code, name):
 
     with open(flag_file, "w", encoding="utf-8") as file:
         file.write("notified\n")
-    print(f"[PRODUCT {name}] notifica inviata, flag creato.")
+    log_status("PRODUCT", name, f"notificato ({len(found)}/2 immagini)")
 
 
 # ---------------------------------------------------------------------------
@@ -511,16 +507,15 @@ def send_news_article(candidate, version, is_update):
 
 def check_news():
     state, initialized = load_news_state()
-    print(f"[NEWS] stato caricato: {len(state)} articoli monitorati.")
 
     try:
         page_candidates = fetch_news_candidates()
     except requests.RequestException as error:
-        print(f"[NEWS] errore rete: {error}")
+        log_status("NEWS", "FOOTY-HEADLINES", f"errore rete: {error}")
         return
 
     if not page_candidates:
-        print("[NEWS] nessun articolo trovato nella pagina.")
+        log_status("NEWS", "FOOTY-HEADLINES", "nessun articolo trovato")
         return
 
     # Un articolo vecchio può essere aggiornato quando non compare più nella
@@ -544,10 +539,6 @@ def check_news():
         candidate_urls.add(url)
         old_candidates += 1
 
-    print(
-        f"[NEWS] controllo aggiornamenti: {len(page_candidates)} in pagina, "
-        f"{old_candidates} articoli vecchi monitorati."
-    )
     changed_state = False
     notifications = 0
 
@@ -557,9 +548,10 @@ def check_news():
         try:
             version = fetch_article_version(candidate)
         except (requests.RequestException, RuntimeError) as error:
-            print(
-                f"[NEWS] impossibile verificare '{candidate['title']}': "
-                f"{error}"
+            log_status(
+                "NEWS",
+                "FOOTY-HEADLINES",
+                f"errore verifica '{candidate['title']}': {error}",
             )
             continue
 
@@ -621,7 +613,11 @@ def check_news():
         )
         send_news_article(candidate, version, is_update=notify_as_update)
         label = "aggiornamento" if notify_as_update else "nuova notizia"
-        print(f"[NEWS] notificato {label}: {version['title']}")
+        log_status(
+            "NEWS",
+            "FOOTY-HEADLINES",
+            f"notificato {label}: {version['title']}",
+        )
 
         state.pop(candidate["url"], None)
         state[candidate["url"]] = handled_version(version)
@@ -633,9 +629,12 @@ def check_news():
         save_news_state(state)
 
     if notifications == 0:
-        print("[NEWS] nessuna notizia nuova o aggiornata.")
-    else:
-        print(f"[NEWS] notifiche inviate: {notifications}")
+        checked = len(page_candidates) + old_candidates
+        log_status(
+            "NEWS",
+            "FOOTY-HEADLINES",
+            f"nessuna novità ({checked} controllati)",
+        )
 
 
 # ---------------------------------------------------------------------------
