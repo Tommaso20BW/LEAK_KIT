@@ -1,4 +1,4 @@
-name: Controlla leak Juventus 26-27
+name: Controlla leak Juventus
 
 on:
   workflow_dispatch: {}      # per lanciarlo a mano da Actions
