@@ -1,5 +1,6 @@
 {
-  "version": 2,
+  "version": 3,
+  "initialized": true,
   "articles": {
     "https://www.footyheadlines.com/2025/06/juventus-25-26-baseball-collection.html": {
       "fingerprint": "22ed053d12441fcfa4df18210347f26d95ef91480f7302ce615b75037c739b2f",
@@ -167,7 +168,8 @@
       "published": "2026-07-21T10:47:29+02:00",
       "modified": "2026-07-21T10:47:29+02:00",
       "title": "Juventus 26-27 Away Kit Released",
-      "description": "Update - Jul 21, 2026: Juventus has officially unveiled their new 2026-27 away kit, bringing back the iconic La Vecchia Signora colors alongside subtle embossed zebra patterns."
+      "description": "Update - Jul 21, 2026: Juventus has officially unveiled their new 2026-27 away kit, bringing back the iconic La Vecchia Signora colors alongside subtle embossed zebra patterns.",
+      "handled_fingerprint": "849589d458b192a603ee03eb1f150adac0e06b9144c2acdd58b86dedd7b4fed4"
     }
   }
 }
